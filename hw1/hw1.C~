@@ -1,0 +1,107 @@
+
+#include <stdio.h>
+#include <omp.h>
+#include <stdlib.h>
+
+#define N 10
+#define M 100
+
+void fill_matrix(int arr[][N], int M) {
+  srand(1234);
+  for (int i=0; i<N; i++) {
+    for (int j=0; j<N; j++) {
+      arr[i][j] = rand() % M;
+    }
+  }
+}
+
+void fill_matrix_p1(int arr[][N], int M) {
+  srand(1234);
+  int n_threads = omp_get_num_threads();
+  #pragma omp parallel {
+  int tid = omp_get_thread_num();
+  int start = tid*N/n_threads;
+  int end = (tid+1)*N/n_threads;
+  int i, j;
+  for (i=start; i<end; i++) {
+    for (j=0; j<N; j++) {
+      arr[i][j] = rand() % M;
+    }
+  }
+  }
+}
+
+void fill_matrix_p2(int arr[][N], int M) {
+  srand(1234);
+  #pragma omp parallel for
+  for (int i=0; i<N; i++) {
+    for (int j=0; j<N; j++) {
+      arr[i][j] = rand() % M;
+    }
+  }
+}
+
+int max_in_matrix(int arr[][N]) {
+  int max = arr[0][0];
+  for (int i=0; i<N; i++) {
+    for (int j=0; j<N; j++) {
+      if (arr[i][j] > max)
+	max = arr[i][j];
+    }
+  }
+  return max;
+}
+
+int max_in_matrix_p1(int arr[][N]) {
+  int n_threads = omp_get_num_threads();
+  #pragma omp parallel {
+  int tid = omp_get_thread_num();
+  int start = tid*N/n_threads;
+  int end = (tid+1)*N/n_threads;
+  for (int i=start; i<end; i++) {
+    for (int j=0; j<N; j++) {
+      if (arr[i][j] > max) {
+	#pragma omp critical
+	max = arr[i][j];
+      }
+    }
+  }
+  }
+  return max;
+}
+
+int max_in_matrix_p2(int arr[][N]) {
+  #pragma omp parallel for
+  for (int i=0; i<N; i++) {
+    for (int j=0; j<N; j++) {
+      if (arr[i][j] > max) {
+	#pragma omp critical
+	max = arr[i][j];
+      }
+    }
+  }
+  return max;
+}
+
+int max_in_matrix_p3(int arr[][N]) {
+  #pragma omp parallel for reduction(max:max)
+  for (int i=0; i<N; i++) {
+    for (int j=0; j<N; j++) {
+      if (arr[i][j] > max)
+	max = arr[i][j];
+    }
+  }
+  return max;
+}
+
+int main(void) {
+  int A[N][N];
+  fill_matrix(A, M);
+  //for (int i=0; i<N; i++) {
+  //  for (int j=0; j<N; j++) {
+  //   printf("%d ", A[i][j]);
+  //  }
+  //  printf("\n");
+  //}
+  return 0;
+}
