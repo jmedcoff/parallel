@@ -25,7 +25,7 @@ how to divide this task. We'll start with a naive function to fill our
 matrix with the desired values.
 
 #+BEGIN_SRC C :tangle yes
-void fill_matrix(int arr[][N], int M) {
+void fill_matrix(int arr[N][N], int N, int M) {
   srand(1234);
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
@@ -39,20 +39,20 @@ Next, in order to parallelize, we consider the nested loop. We know C
 is row-major, so we would like to parallelize on the outer loop.
 
 #+BEGIN_SRC C :tangle yes
-void fill_matrix_p1(int arr[][N], int M) {
+void fill_matrix_p1(int arr[N][N], int N, int M) {
   srand(1234);
   int n_threads = omp_get_num_threads();
-  #pragma omp parallel 
+  #pragma omp parallel shared(arr)
   {
-  int tid = omp_get_thread_num();
-  int start = tid*N/n_threads;
-  int end = (tid+1)*N/n_threads;
-  int i, j;
-  for (i=start; i<end; i++) {
-    for (j=0; j<N; j++) {
-      arr[i][j] = rand() % M;
+    int tid = omp_get_thread_num();
+    int start = tid*N/n_threads;
+    int end = (tid+1)*N/n_threads;
+    int i, j;
+    for (i=start; i<end; i++) {
+      for (j=0; j<N; j++) {
+	arr[i][j] = rand() % M;
+      }
     }
-  }
   }
 }
 #+END_SRC
@@ -60,7 +60,7 @@ void fill_matrix_p1(int arr[][N], int M) {
 For another variant, we can utilize the ~for~ construct.
 
 #+BEGIN_SRC C :tangle yes
-void fill_matrix_p2(int arr[][N], int M) {
+void fill_matrix_p2(int arr[N][N], int N, int M) {
   srand(1234);
   #pragma omp parallel for
   for (int i=0; i<N; i++) {
@@ -79,7 +79,7 @@ matrix. Intuitively, this is where the omp ~reduction~ clause will
 shine, but we still begin with a serial version.
 
 #+BEGIN_SRC C :tangle yes
-int max_in_matrix(int arr[][N]) {
+int max_in_matrix(int arr[N][N], int N) {
   int max = arr[0][0];
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
@@ -94,10 +94,10 @@ int max_in_matrix(int arr[][N]) {
 The next version assigns work explicitly among each thread.
 
 #+BEGIN_SRC C :tangle yes
-int max_in_matrix_p1(int arr[][N]) {
+int max_in_matrix_p1(int arr[N][N], int N) {
   int max = arr[0][0];
   int n_threads = omp_get_num_threads();
-  #pragma omp parallel 
+  #pragma omp parallel shared(max)
   {
   int tid = omp_get_thread_num();
   int start = tid*N/n_threads;
@@ -119,7 +119,7 @@ Next, an intelligent version can be constructed by using a parallel
 for.
 
 #+BEGIN_SRC C :tangle yes
-int max_in_matrix_p2(int arr[][N]) {
+int max_in_matrix_p2(int arr[N][N], int N) {
   int max = arr[0][0];
   #pragma omp parallel for
   for (int i=0; i<N; i++) {
@@ -138,7 +138,7 @@ Finally, reduction is used to abstract away the task of computing the
 maximum between threads.
 
 #+BEGIN_SRC C :tangle yes
-int max_in_matrix_p3(int arr[][N]) {
+int max_in_matrix_p3(int arr[N][N], int N) {
   int max = arr[0][0];
   #pragma omp parallel for reduction(max:max)
   for (int i=0; i<N; i++) {
@@ -153,16 +153,17 @@ int max_in_matrix_p3(int arr[][N]) {
 
 #+BEGIN_SRC C :tangle yes :exports none
 int main(void) {
-  int A[N][N];
-  fill_matrix_p1(A, M);
+  int (*A)[N] = malloc(sizeof(int[N][N]));
+  fill_matrix(A, N, M);
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
      printf("%d ", A[i][j]);
     }
     printf("\n");
   }
-  int maximum = max_in_matrix(A);
+  int maximum = max_in_matrix_p3(A, N);
   printf("%d\n", maximum);
+  free(A);
   return 0;
 } // at this point, the random matrix
   // is being successfully created
@@ -170,3 +171,9 @@ int main(void) {
 #+END_SRC
 
 * Histograms
+
+Each histogram that we construct will be a structure containing the
+values for every bin in the histogram. We will begin by constructing
+an array, and iterating through the matrix, incrementing the
+appropriate bin in the array for each matrix entry. We can easily see
+that for a square matrix of size $N$, 
