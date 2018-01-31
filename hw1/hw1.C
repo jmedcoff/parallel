@@ -3,6 +3,8 @@
 #include <omp.h>
 #include <stdlib.h>
 
+#define THREADS 4
+#define SCHED static
 const int N = 1000;
 const int M = 100;
 
@@ -18,7 +20,7 @@ void fill_matrix(int arr[N][N], int N, int M) {
 void fill_matrix_p1(int arr[N][N], int N, int M) {
   srand(1234);
   int n_threads;
-  #pragma omp parallel shared(n_threads)
+  #pragma omp parallel shared(n_threads) num_threads(THREADS)
   {
     #pragma omp single
       n_threads = omp_get_num_threads();
@@ -36,7 +38,7 @@ void fill_matrix_p1(int arr[N][N], int N, int M) {
 
 void fill_matrix_p2(int arr[N][N], int N, int M) {
   srand(1234);
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       arr[i][j] = rand() % M;
@@ -58,7 +60,7 @@ int max_in_matrix(int arr[N][N], int N) {
 int max_in_matrix_p1(int arr[N][N], int N) {
   int max = arr[0][0];
   int n_threads;
-  #pragma omp parallel shared(n_threads)
+  #pragma omp parallel shared(n_threads) num_threads(THREADS)
   {
     #pragma omp single
       n_threads = omp_get_num_threads();
@@ -83,7 +85,7 @@ int max_in_matrix_p1(int arr[N][N], int N) {
 
 int max_in_matrix_p2(int arr[N][N], int N) {
   int max = arr[0][0];
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       if (arr[i][j] > max) {
@@ -97,7 +99,7 @@ int max_in_matrix_p2(int arr[N][N], int N) {
 
 int max_in_matrix_p3(int arr[N][N], int N) {
   int max = arr[0][0];
-  #pragma omp parallel for reduction(max:max)
+  #pragma omp parallel for reduction(max:max) num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       if (arr[i][j] > max)
@@ -122,7 +124,7 @@ void make_histogram(int hist[], int arr[N][N], int N, int M) {
 
 void make_histogram_p1(int hist[], int arr[N][N], int N, int M) {
   int n_threads;
-  #pragma omp parallel shared(n_threads)
+  #pragma omp parallel shared(n_threads) num_threads(THREADS)
   {
     #pragma omp single
       n_threads = omp_get_num_threads();
@@ -144,7 +146,7 @@ void make_histogram_p1(int hist[], int arr[N][N], int N, int M) {
 }
 
 void make_histogram_p2(int hist[], int arr[N][N], int N, int M) {
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       for (int k=0; k<10; k++) {
@@ -159,7 +161,7 @@ void make_histogram_p2(int hist[], int arr[N][N], int N, int M) {
 }
 
 void make_histogram_p3(int hist[], int arr[N][N], int N, int M) {
-  #pragma omp parallel for reduction(+:hist[:10])
+  #pragma omp parallel for reduction(+:hist[:10]) num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       for (int k=0; k<10; k++) {
