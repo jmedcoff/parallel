@@ -13,6 +13,7 @@
 #+END_SRC
 
 #+BEGIN_SRC C :tangle yes :exports none
+// parameters section: easy access for testing
 #define THREADS 4
 #define SCHED static
 const int N = 1000;
