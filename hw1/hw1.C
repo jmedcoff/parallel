@@ -3,10 +3,11 @@
 #include <omp.h>
 #include <stdlib.h>
 
-#define THREADS 4
-#define SCHED static
-const int N = 1000;
-const int M = 100;
+// parameters section: easy access for testing
+#define THREADS 8 // 4, 8
+#define SCHED guided
+const int N = 10; // 10, 100, 10000
+const int M = 100; // 100, 1000
 
 void fill_matrix(int arr[N][N], int N, int M) {
   srand(1234);
@@ -67,11 +68,8 @@ int max_in_matrix_p1(int arr[N][N], int N) {
     int tid = omp_get_thread_num();
     int start = tid*N/n_threads;
     int end = (tid+1)*N/n_threads;
-    printf("\n\n");
     for (int i=start; i<end; i++) {
-      printf("\n");
       for (int j=0; j<N; j++) {
-	printf("%d\t", arr[i][j]);
 	if (arr[i][j] > max) {
 	  #pragma omp critical
 	  max = arr[i][j];
@@ -186,6 +184,8 @@ int main(void) {
   int (*A)[N] = malloc(sizeof(int[N][N]));
   int max;
   int hist[10];
+  for (int k=0; k<10; k++) {
+  hist[k] = 0; }
   double sumtime = 0;
   double start;
 
@@ -196,8 +196,10 @@ int main(void) {
     make_histogram(hist, A, N, M);
     sumtime += read_timer() - start;
   }
-
+  free(A);
   double avg_elapsed_ms = sumtime*100;
   printf("N: %d, M: %d, t (ms) = %f\n", N, M, avg_elapsed_ms);
+  for (int j=0; j<10; j++) {
+    printf("Bin %d: %d\n", j, hist[j]); }
   return 0;
 }

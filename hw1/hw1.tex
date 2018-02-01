@@ -1,4 +1,4 @@
-% Created 2018-01-30 Tue 17:34
+% Created 2018-01-31 Wed 22:50
 \documentclass[11pt]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -50,13 +50,15 @@ void fill_matrix(int arr[N][N], int N, int M) {
 \end{verbatim}
 
 Next, in order to parallelize, we consider the nested loop. We know C
-is row-major, so we would like to parallelize on the outer loop.
+is row-major, so we would like to parallelize on the outer
+loop. \verb~THREADS~ and \verb~SCHED~ from now on denote macros for the number
+of threads to use and schedule to use, respectively.
 
 \begin{verbatim}
 void fill_matrix_p1(int arr[N][N], int N, int M) {
   srand(1234);
   int n_threads;
-  #pragma omp parallel shared(n_threads)
+  #pragma omp parallel shared(n_threads) num_threads(THREADS)
   {
     #pragma omp single
       n_threads = omp_get_num_threads();
@@ -78,7 +80,7 @@ For another variant, we can utilize the \verb~for~ construct.
 \begin{verbatim}
 void fill_matrix_p2(int arr[N][N], int N, int M) {
   srand(1234);
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       arr[i][j] = rand() % M;
@@ -117,18 +119,15 @@ The next version assigns work explicitly among each thread.
 int max_in_matrix_p1(int arr[N][N], int N) {
   int max = arr[0][0];
   int n_threads;
-  #pragma omp parallel shared(n_threads)
+  #pragma omp parallel shared(n_threads) num_threads(THREADS)
   {
     #pragma omp single
       n_threads = omp_get_num_threads();
     int tid = omp_get_thread_num();
     int start = tid*N/n_threads;
     int end = (tid+1)*N/n_threads;
-    printf("\n\n");
     for (int i=start; i<end; i++) {
-      printf("\n");
       for (int j=0; j<N; j++) {
-	printf("%d\t", arr[i][j]);
 	if (arr[i][j] > max) {
 	  #pragma omp critical
 	  max = arr[i][j];
@@ -146,7 +145,7 @@ Next, an intelligent version can be constructed by using a \verb~parallel for~.
 \begin{verbatim}
 int max_in_matrix_p2(int arr[N][N], int N) {
   int max = arr[0][0];
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       if (arr[i][j] > max) {
@@ -165,7 +164,7 @@ maximum between threads.
 \begin{verbatim}
 int max_in_matrix_p3(int arr[N][N], int N) {
   int max = arr[0][0];
-  #pragma omp parallel for reduction(max:max)
+  #pragma omp parallel for reduction(max:max) num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       if (arr[i][j] > max)
@@ -194,7 +193,7 @@ elements of the matrix, we loop over the bins and increment the
 appropriate bin, then break.
 
 \begin{verbatim}
-void make_histogram(hist[], arr[N][N], int N, int M) {
+void make_histogram(int hist[], int arr[N][N], int N, int M) {
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       for (int k=0; k<10; k++) {
@@ -211,9 +210,9 @@ void make_histogram(hist[], arr[N][N], int N, int M) {
 Next, a parallel version is implemented with manual task assignment.
 
 \begin{verbatim}
-void make_histogram_p1(hist[], arr[N][N], int N, int M) {
+void make_histogram_p1(int hist[], int arr[N][N], int N, int M) {
   int n_threads;
-  #pragma omp parallel shared(n_threads)
+  #pragma omp parallel shared(n_threads) num_threads(THREADS)
   {
     #pragma omp single
       n_threads = omp_get_num_threads();
@@ -235,9 +234,11 @@ void make_histogram_p1(hist[], arr[N][N], int N, int M) {
 }
 \end{verbatim}
 
+Here, we write a version with the \verb~for~ construct.
+
 \begin{verbatim}
-void make_histogram_p2(hist[], arr[N][N], int N, int M) {
-  #pragma omp parallel for
+void make_histogram_p2(int hist[], int arr[N][N], int N, int M) {
+  #pragma omp parallel for num_threads(THREADS) schedule(SCHED)
   for (int i=0; i<N; i++) {
     for (int j=0; j<N; j++) {
       for (int k=0; k<10; k++) {
@@ -252,6 +253,44 @@ void make_histogram_p2(hist[], arr[N][N], int N, int M) {
 }
 \end{verbatim}
 
+And again, with a reduction.
+
+\begin{verbatim}
+void make_histogram_p3(int hist[], int arr[N][N], int N, int M) {
+  #pragma omp parallel for reduction(+:hist[:10]) num_threads(THREADS) schedule(SCHED)
+  for (int i=0; i<N; i++) {
+    for (int j=0; j<N; j++) {
+      for (int k=0; k<10; k++) {
+	if (k*M/10 <= arr[i][j] && arr[i][j] < (k+1)*M/10) {
+	  hist[k]++;
+	  break;
+	}
+      }
+    }
+  }
+}
+\end{verbatim}
+
+Trial runs to construct matrices, find maximums, and build histograms
+can now be performed. Out of a few tests, we find that the most common
+maximums are unsurprisingly 98 and 99, while a sample histogram
+follows.
+
+\begin{center}
+\begin{tabular}{lrrrrr}
+Range & [0,10) & [10,20) & [20,30) & [30,40) & [40,50)\\
+Occurrences & 11 & 6 & 8 & 17 & 6\\
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tabular}{lrrrrr}
+Continued & [50,60) & [60,70) & [70,80) & [80,90) & [90,100)\\
+\ldots{} & 11 & 17 & 10 & 9 & 5\\
+\end{tabular}
+\end{center}
+
+
 \section{Experiment}
 \label{sec-4}
 
@@ -264,6 +303,117 @@ versions -- each on two thread sizes -- with static, dynamic with
 chunk size 2, dynamic with chunk size 5, and guided schedules.
 
 Each of the described tests will be performed with $N \in \{10, 10^2,
-10^4\}$ and $M \in \{100, 1000\}$.
+10^4\}$ and $M \in \{100, 1000\}$. We begin by borrowing the timing
+code from an in class exercise.
+
+\begin{verbatim}
+#include <sys/timeb.h>
+double read_timer() {
+    struct timeb tm;
+    ftime(&tm);
+    return (double) tm.time + (double) tm.millitm / 1000.0;
+}
+\end{verbatim}
+
+The \verb~main~ function containing the test code follows. Note that the
+code computes an average runtime of 10 executions. \verb~N~ and \verb~M~ are
+declared as constant integers to simplify testing.
+
+\begin{verbatim}
+// batch test: average of 10 runs
+int main(void) {
+  int (*A)[N] = malloc(sizeof(int[N][N]));
+  int max;
+  int hist[10];
+  for (int k=0; k<10; k++) {
+  hist[k] = 0; }
+  double sumtime = 0;
+  double start;
+
+  for (int i=0; i<10; i++) {
+    start = read_timer();
+    fill_matrix(A, N, M);
+    max = max_in_matrix(A, N); // replace with others too
+    make_histogram(hist, A, N, M);
+    sumtime += read_timer() - start;
+  }
+  free(A);
+  double avg_elapsed_ms = sumtime*100;
+  printf("N: %d, M: %d, t (ms) = %f\n", N, M, avg_elapsed_ms);
+  return 0;
+}
+\end{verbatim}
+
+The first table represents the four algorithms plotted against N with
+M fixed at 100 on a static schedule with 4 threads. We can see clear
+improvement in the parallel algorithms over the serial
+version. Namely, the \verb~reduction~ algorithm is more than twice as fast.
+
+\begin{center}
+\begin{tabular}{lrrr}
+ & N=10 & N=100 & N=10000\\
+serial & 0.1 & 4.39 & 31106.2\\
+p1 & 0.2 & 2.79 & 24000.4\\
+p2 & 0.19 & 2.89 & 23847.2\\
+p3 & 0.1 & 2.20 & 13829.3\\
+\end{tabular}
+\end{center}
+
+
+The second table has the same structure as table 1, but with M fixed
+at 1000. The numbers are for the most part similar to above.
+
+\begin{center}
+\begin{tabular}{lrrr}
+ & N=10 & N=100 & N=10000\\
+serial & 0.1 & 4.31 & 38313.3\\
+p1 & 0.09 & 3.20 & 24028.1\\
+p2 & 0.1 & 3.10 & 23894.1\\
+p3 & 0.107 & 2.11 & 13772.4\\
+\end{tabular}
+\end{center}
+
+
+The third table gives the three parallel algorithms plotted against
+the number of threads used, either 4 or 8, with N fixed at $10^4$ and
+M fixed at 1000. Surprisingly, more threads does not universally yield
+a faster execution time, but this may be due to experimental error
+such as background tasks or too few threads to notice a substantial
+difference.
+
+\begin{center}
+\begin{tabular}{lrr}
+ & 4 threads & 8 threads\\
+p1 & 24028.1 & 27158.0\\
+p2 & 23894.1 & 26884.2\\
+p3 & 13772.4 & 13716.4\\
+\end{tabular}
+\end{center}
+
+
+The final table gives the results of different schedule types,
+relevant only to the algorithms using \verb~for~ constructs. N and M are
+fixed as above, with the number of threads fixed at 8. The difference
+in runtime is not so great here, most likely due to the fact that the
+workload on different rows of the matrix are about the same.
+
+\begin{center}
+\begin{tabular}{rrrr}
+static & chunk 2 & chunk 5 & guided\\
+26884.2 & 26907.9 & 26709.7 & 26624.6\\
+13716.4 & 13642.3 & 13610.9 & 13713.2\\
+\end{tabular}
+\end{center}
+
+\section{Conclusion}
+\label{sec-5}
+
+Generally, the parallel algorithms outperformed the serial
+algorithm. Experimenting with different schedules and implementations
+gave insight into how they affected the running time. Reduction
+clauses seem to work well, at least in dense data
+situations. Interesting further work on the experiment might consider
+sparse matrices, i.e. where elements are random, and their
+distribution is random but based on a sparseness factor.
 % Emacs 25.2.2 (Org mode 8.2.10)
 \end{document}
