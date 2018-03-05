@@ -1,5 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
+#include "PQ.h"
+#include <pthread.h>
+#include <sys/timeb.h>
+
+#define P 10007 // medium sized prime, used in hash
+#define K 10 // size of hash table thread block
+#define NLOCKS 101 // ceil(P/K)
 
 
 /* -------------------------------- */
@@ -65,27 +74,36 @@ typedef struct entry {
     node* values;
 } entry;
 
-typedef struct hashtable {
-    int size;
+typedef struct hashtable { // of size P
     int num_entries;
-    entry* table[];
+    pthread_rwlock_t locks[NLOCKS];
+    //pthread_mutex_t locks[NLOCKS];
+    entry** table;
 } hashtable;
 
 // init table with keys=0 and no values
-hashtable* create_table(int n) {
-    entry* tab = malloc(n*sizeof(entry));
+hashtable* create_table() {
+    entry** tab = malloc(P*sizeof(entry*));
     hashtable* newtable = malloc(sizeof(hashtable));
-    newtable->size = n;
-    for (int i=0; i<n; i++) {
+    newtable->table = tab;
+    for (int i=0; i<P; i++) {
         newtable->table[i]->key = 0;
         newtable->table[i]->values = NULL;
+    }
+    for (int j=0; j<NLOCKS; j++) {
+        //pthread_mutex_init(&newtable->locks[j], NULL);
+        pthread_rwlock_init(&newtable->locks[j], NULL);
     }
     return newtable;
 }
 
 void free_table(hashtable* h) {
-    for (int i=0; i<h->size; i++) {
-        h->table[i]->values = NULL;
+    for (int i=0; i<P; i++) {
+        node_dispose(h->table[i]->values);
+    }
+    for (int j=0; j<NLOCKS; j++) {
+        //pthread_mutex_destroy(&h->locks[j]);
+        pthread_rwlock_destroy(&h->locks[j]);
     }
     free(h->table);
     free(h);
@@ -93,18 +111,34 @@ void free_table(hashtable* h) {
 
 // TODO: Come up with something intelligent
 unsigned int hash_state(int a[4][4]) {
-    return 0;
+    unsigned int key = 1;
+    int i;
+    for (i=0; i<4; i++) {
+        key *= a[0][i];
+    }
+    return key % P;
 }
 
 void add_to_table(hashtable* h, int a[4][4]) {
     unsigned int key = hash_state(a);
+    int tn = (int) floor((key/P)*NLOCKS);
+    pthread_rwlock_wrlock(&h->locks[tn]);
+    //pthread_mutex_lock(&h->locks[tn]);
     h->table[key]->key = key;
     node_append(h->table[key]->values, a);
+    h->num_entries++;
+    pthread_rwlock_unlock(&h->locks[tn]);
+    //pthread_mutex_unlock(&h->locks[tn]);
 }
 
 int check_table(hashtable* h, int a[4][4]) {
     unsigned int key = hash_state(a);
+    int tn = (int) floor((key/P)*NLOCKS);
+    pthread_rwlock_rdlock(&h->locks[tn]);
+    //pthread_mutex_lock(&h->locks[tn]);
     node* res = node_search(h->table[key]->values, a);
+    pthread_rwlock_unlock(&h->locks[tn]);
+    //pthread_mutex_unlock(&h->locks[tn]);
     if (res)
         return 1;
     return 0;
@@ -120,10 +154,10 @@ int check_table(hashtable* h, int a[4][4]) {
 
 //the finished game. 0 represents the empty tile
 const int done[4][4] = {
-        {1, 2, 3, 4},
-        {5, 6, 7, 8},
-        {9, 10, 11, 12},
-        {13, 14, 15, 0}};
+        {1,   2,   3,  4},
+        {5,   6,   7,  8},
+        {9,  10,  11, 12},
+        {13, 14,  15,  0}};
 
 int is_done(int s[4][4]) {
     int i, j;
@@ -136,80 +170,132 @@ int is_done(int s[4][4]) {
     return 1; // done
 }
 
+int** copyarray(int s[4][4]) {
+    int i, j, temp[4][4];
+    for (i=0; i<4; i++) {
+        for (j = 0; j < 4; j++) {
+            temp[i][j] = s[i][j];
+        }
+    }
+    return (int **)temp;
+}
+
 //movement controls: designate motion of the empty tile
 
-void left(int s[4][4]) {
-    int i, j, temp;
+int** left(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
     for (i=0; i<4; i++) {
         for (j=0; j<4; j++) {
-            if (s[i][j] == 0 && j != 0) {
-                temp = s[i][j-1];
-                s[i][j-1] = 0;
-                s[i][j] = temp;
-                return;
+            if (ret[i][j] == 0 && j != 0) {
+                temp = ret[i][j-1];
+                ret[i][j-1] = 0;
+                ret[i][j] = temp;
+                return ret;
             }
         }
     }
 }
 
-void right(int s[4][4]) {
-    int i, j, temp;
+int** right(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
     for (i=0; i<4; i++) {
         for (j=0; j<4; j++) {
-            if (s[i][j] == 0 && j != 3) {
-                temp = s[i][j+1];
-                s[i][j+1] = 0;
-                s[i][j] = temp;
-                return;
+            if (ret[i][j] == 0 && j != 3) {
+                temp = ret[i][j+1];
+                ret[i][j+1] = 0;
+                ret[i][j] = temp;
+                return ret;
             }
         }
     }
 }
 
-void up(int s[4][4]) {
-    int i, j, temp;
+int** up(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
     for (i=0; i<4; i++) {
         for (j=0; j<4; j++) {
-            if (s[i][j] == 0 && i != 0) {
-                temp = s[i-1][j];
-                s[i-1][j] = 0;
-                s[i][j] = temp;
-                return;
+            if (ret[i][j] == 0 && i != 0) {
+                temp = ret[i-1][j];
+                ret[i-1][j] = 0;
+                ret[i][j] = temp;
+                return ret;
             }
         }
     }
 }
 
-void down(int s[4][4]) {
-    int i, j, temp;
+int** down(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
     for (i=0; i<4; i++) {
         for (j=0; j<4; j++) {
-            if (s[i][j] == 0 && i != 3) {
-                temp = s[i+1][j];
-                s[i+1][j] = 0;
-                s[i][j] = temp;
-                return;
+            if (ret[i][j] == 0 && i != 3) {
+                temp = ret[i+1][j];
+                ret[i+1][j] = 0;
+                ret[i][j] = temp;
+                return ret;
             }
         }
     }
 }
 
+typedef struct coord {
+    int x;
+    int y;
+} coord;
 
+coord locate(int a, int s[4][4]) {
+    for (int i=0; i<4; i++) {
+        for (int j=0; j<4; j++) {
+            if (s[i][j] == a) {
+                coord res;
+                res.x = i;
+                res.y = j;
+                return res;
+            }}
+        }
+}
+
+int manhattan(int s[4][4]) {
+    int res = 0;
+    for (int a=0; a<16; a++) {
+        coord c = locate(a, s);
+        coord r = locate(a, done);
+        res += abs(c.x - r.x) + abs(c.y - r.y);
+    }
+    return res;
+}
+
+bool compare(int (*s)[4][4], int (*t)[4][4]) {
+    int sdist = manhattan(*s);
+    int tdist = manhattan(*t);
+    if (sdist < tdist)
+        return true;
+    else
+        return false;
+}
+
+int solve(int s[4][4], pq_t queue, hashtable* table) {
+    pq_enqueue(queue, s, NULL);
+    add_to_table(table, s);
+
+}
+
+int subsolve(int s[4][4]) {
+    if (is_done(s))
+        return 1;
+    else
+//        return subsolve(left(copyarray(s))) +
+//               subsolve(right(copyarray(s))) +
+//               subsolve(up(copyarray(s))) +
+//               subsolve(down(copyarray(s)));
+        return pthread_create(NULL, NULL, &subsolve, left(copyarray(s))) +
+               pthread_create(NULL, NULL, &subsolve, right(copyarray(s))) +
+               pthread_create(NULL, NULL, &subsolve, up(copyarray(s))) +
+               pthread_create(NULL, NULL, &subsolve, down(copyarray(s)));
+
+}
 
 int main() {
-    int new[4][4] = {
-            {1, 2, 3, 4},
-            {5, 6, 7, 8},
-            {9, 10, 0, 12},
-            {13, 14, 11, 15}};
-    down(new);
-    int i, j;
-    for (i=0; i<4; i++) {
-        for (j = 0; j<4; j++) {
-            printf("%d ", new[i][j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
+    hashtable* ht = create_table();
     return 0;
 }
