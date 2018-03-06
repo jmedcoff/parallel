@@ -1,0 +1,176 @@
+% Created 2018-03-06 Tue 10:27
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{fixltx2e}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{marvosym}
+\usepackage{wasysym}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\tolerance=1000
+\usepackage{geometry}
+\geometry{a4paper}
+\author{Jason Medcoff}
+\date{\today}
+\title{Assignment 2}
+\hypersetup{
+  pdfkeywords={},
+  pdfsubject={},
+  pdfcreator={Emacs 25.2.2 (Org mode 8.2.10)}}
+\begin{document}
+
+\maketitle
+
+\section{Problem 1}
+\label{sec-1}
+
+To begin, we would like to implement a threaded hash table with
+chaining. To perform chaining, we first must implement a list. In pure
+C, without classes, we resort to structs and pointers. The list is
+implemented to be generic, using void pointers to store data.
+
+\begin{verbatim}
+/* -------------------------------- */
+/* ----------- List ops ----------- */
+/* -------------------------------- */
+
+typedef struct node {
+    void *data; //generic data
+    struct node *next; //successor node
+} node;
+
+node* node_create(void *data, node *next) {
+    node* newnode = (node*)malloc(sizeof(node));
+    newnode->data = data;
+    newnode->next = next;
+    return newnode;
+}
+
+node* node_push(node* head, void *data) {
+    node* newnode = node_create(data, head);
+    head = newnode;
+    return head;
+}
+
+node* node_append(node* head, void *data) {
+    node* current = head;
+    while (current->next != NULL)
+        current = current->next;
+    node* newnode = node_create(data, NULL);
+    current->next = newnode;
+    return head;
+}
+
+node* node_search(node* head, void *data) {
+    node* current = head;
+    while (current != NULL) {
+        if (current->data == data)
+            return current;
+        current = current->next;
+    }
+    return NULL;
+}
+
+void node_dispose(node* head) {
+    node *current, *temp;
+    if (head != NULL) {
+        current = head->next;
+        head->next = NULL;
+        while (current != NULL) {
+            temp = current->next;
+            free(current);
+            current = temp;
+        }
+    }
+}
+\end{verbatim}
+
+The typical list interface is found, with an additional memory
+management operation, \verb~node_dispose~, to free the list.
+
+Looking ahead to problem 2, we know we will need to place instances of
+a 15-puzzle into our hash table. Thus, to simplify implementation, we
+will construct the hash table specifically for the data structure
+chosen for the 15-puzzle. For simplicity, a puzzle state will be
+represented as a $4 \times 4$ array, containing the numbers 0
+through 15. The address occupied by 0 represents the empty tile,
+whereas the remaining numbers represent the tiles in order, i.e., 1
+resides in the upper left corner, 4 in the upper right, 13 in the
+bottom left, etc. This arrangement allows operations on puzzle states
+to perform very fast, nearly indistinguishable from constant
+time. This will become relevant when we are moving tiles around to
+solve the game. 
+
+In the hash table implementation, we will consider a set of entries
+and a set of pthread locks, with each lock associated with a size \verb~k~
+block of entries.
+
+\begin{verbatim}
+typedef struct entry {
+    unsigned int key;
+    node* values;
+} entry;
+
+typedef struct hashtable { // of size P
+    int num_entries;
+    pthread_rwlock_t locks[NLOCKS];
+    //pthread_mutex_t locks[NLOCKS];
+    entry** table;
+} hashtable;
+\end{verbatim}
+
+To create a new hashtable, we will allocate the appropriate memory for
+the entries and initialize all entry keys to zero, and all values to
+\verb~NULL~. The values will eventually be a list of all states associated
+with the respective keys. As with the list, we must create a routine
+to free a created table from memory. However, here we must also take
+care to dispose of each pthread lock we had created.
+
+\begin{verbatim}
+// init table with keys=0 and no values
+hashtable* create_table() {
+    entry** tab = malloc(P*sizeof(entry*));
+    hashtable* newtable = malloc(sizeof(hashtable));
+    newtable->table = tab;
+    for (int i=0; i<P; i++) {
+        newtable->table[i]->key = 0;
+        newtable->table[i]->values = NULL;
+    }
+    for (int j=0; j<NLOCKS; j++) {
+        //pthread_mutex_init(&newtable->locks[j], NULL);
+        pthread_rwlock_init(&newtable->locks[j], NULL);
+    }
+    return newtable;
+}
+
+void free_table(hashtable* h) {
+    for (int i=0; i<P; i++) {
+        node_dispose(h->table[i]->values);
+    }
+    for (int j=0; j<NLOCKS; j++) {
+        //pthread_mutex_destroy(&h->locks[j]);
+        pthread_rwlock_destroy(&h->locks[j]);
+    }
+    free(h->table);
+    free(h);
+}
+\end{verbatim}
+
+Among the most challenging tasks for problem 1 is designing a somewhat
+intelligent hash function for gamestates. While chaining removes the
+need for extreme cleverness, a good hash function will still try to
+evenly distribute values among the table. Efficiency will also be of
+great importance. Here we will take the product of the first row of
+the puzzle, and modulo by a number \verb~P~. Namely, the maximum possible
+product is $32670 = 12\cdot 13 \cdot 14\cdot 15$, and we will modulo
+by \verb~P~ = 10007, a prime number.
+% Emacs 25.2.2 (Org mode 8.2.10)
+\end{document}

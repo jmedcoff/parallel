@@ -1,0 +1,14 @@
+#+TITLE: Assignment 2
+#+AUTHOR: Jason Medcoff
+
+#+LaTeX_HEADER: \usepackage{geometry}
+#+LaTeX_HEADER: \geometry{a4paper}
+#+OPTIONS: toc:nil
+#+STARTUP: showall
+
+* Problem 1
+
+To begin, we would like to implement a threaded hash table with
+chaining. To perform chaining, we first must implement a list. In pure
+C, without classes, we resort to structs and pointers. The list is
+implemented to be generic, using void pointers to store data.

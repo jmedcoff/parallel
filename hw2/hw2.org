@@ -1,17 +1,19 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <stdbool.h>
-#include "PQ.h"
-#include <pthread.h>
-#include <sys/timeb.h>
-#include <sys/random.h>
+#+TITLE: Assignment 2
+#+AUTHOR: Jason Medcoff
 
-#define P 10007 // medium sized prime, used in hash
-#define K 10 // size of hash table thread block
-#define NLOCKS 101 // ceil(P/K)
+#+LaTeX_HEADER: \usepackage{geometry}
+#+LaTeX_HEADER: \geometry{a4paper}
+#+OPTIONS: toc:nil
+#+STARTUP: showall
 
+* Problem 1
 
+To begin, we would like to implement a threaded hash table with
+chaining. To perform chaining, we first must implement a list. In pure
+C, without classes, we resort to structs and pointers. The list is
+implemented to be generic, using void pointers to store data.
+
+#+BEGIN_SRC c
 /* -------------------------------- */
 /* ----------- List ops ----------- */
 /* -------------------------------- */
@@ -65,11 +67,29 @@ void node_dispose(node* head) {
         }
     }
 }
+#+END_SRC
 
-/* -------------------------------- */
-/* ---------- Hash table ---------- */
-/* -------------------------------- */
+The typical list interface is found, with an additional memory
+management operation, ~node_dispose~, to free the list.
 
+Looking ahead to problem 2, we know we will need to place instances of
+a 15-puzzle into our hash table. Thus, to simplify implementation, we
+will construct the hash table specifically for the data structure
+chosen for the 15-puzzle. For simplicity, a puzzle state will be
+represented as a $4 \times 4$ array, containing the numbers 0
+through 15. The address occupied by 0 represents the empty tile,
+whereas the remaining numbers represent the tiles in order, i.e., 1
+resides in the upper left corner, 4 in the upper right, 13 in the
+bottom left, etc. This arrangement allows operations on puzzle states
+to perform very fast, nearly indistinguishable from constant
+time. This will become relevant when we are moving tiles around to
+solve the game. 
+
+In the hash table implementation, we will consider a set of entries
+and a set of pthread locks, with each lock associated with a size ~k~
+block of entries.
+
+#+BEGIN_SRC c
 typedef struct entry {
     unsigned int key;
     node* values;
@@ -81,7 +101,16 @@ typedef struct hashtable { // of size P
     //pthread_mutex_t locks[NLOCKS];
     entry** table;
 } hashtable;
+#+END_SRC
 
+To create a new hashtable, we will allocate the appropriate memory for
+the entries and initialize all entry keys to zero, and all values to
+~NULL~. The values will eventually be a list of all states associated
+with the respective keys. As with the list, we must create a routine
+to free a created table from memory. However, here we must also take
+care to dispose of each pthread lock we had created.
+
+#+BEGIN_SRC c
 // init table with keys=0 and no values
 hashtable* create_table() {
     entry** tab = malloc(P*sizeof(entry*));
@@ -109,8 +138,18 @@ void free_table(hashtable* h) {
     free(h->table);
     free(h);
 }
+#+END_SRC
 
-// TODO: Come up with something intelligent
+Among the most challenging tasks for problem 1 is designing a somewhat
+intelligent hash function for gamestates. While chaining removes the
+need for extreme cleverness, a good hash function will still try to
+evenly distribute values among the table. Efficiency will also be of
+great importance. Here we will take the product of the first row of
+the puzzle, and modulo by a number ~P~. Namely, the maximum possible
+product is $32670 = 12\cdot 13 \cdot 14\cdot 15$, and we will modulo
+by ~P~ = 10007, a prime number.
+
+#+BEGIN_SRC c
 unsigned int hash_state(int a[4][4]) {
     unsigned int key = 1;
     int i;
@@ -119,7 +158,12 @@ unsigned int hash_state(int a[4][4]) {
     }
     return key % P;
 }
+#+END_SRC
 
+Next, we can now design functions to add values to the table, as well
+as check the table for existence of a particular value.
+
+#+BEGIN_SRC c
 void add_to_table(hashtable* h, int a[4][4]) {
     unsigned int key = hash_state(a);
     int tn = (int) floor((key/P)*NLOCKS);
@@ -144,7 +188,21 @@ int check_table(hashtable* h, int a[4][4]) {
         return 1;
     return 0;
 }
+#+END_SRC
 
+Note that in all code above, mutex and rwlocks are present, with one
+or the other commented out to allow switching between the two used in
+implementation.
+
+For testing purposes, we want to try hashing different objects and
+observe the running time. To do this, we must create objects the table
+can hash. While the puzzle states will be as described above, we can
+be more lenient with regards to testing, since the hash function will
+operate on a 2D array by taking the product of the first row. So, our
+function to create states for testing need only worry about putting
+numbers in the first row of a 2D array; we will do so randomly.
+
+#+BEGIN_SRC c
 int** rand_state() {
     // for testing purposes, we need only care about
     // the rop row
@@ -155,7 +213,12 @@ int** rand_state() {
     }
     return a;
 }
+#+END_SRC
 
+The driver for problem 1 can be written. We create 10,000 entries,
+then hash them and record the time taken.
+
+#+BEGIN_SRC c
 void driver1() {
     hashtable* ht = create_table();
     time_t now = time(NULL);
@@ -165,9 +228,20 @@ void driver1() {
     int n = time(NULL) - now;
     printf("time: %d\n", n);
 }
+#+END_SRC
+
+# do something about testing here
 
 
 
+* Problem 2
+
+As described above, puzzle states are represented as $4\times 4$
+arrays holding the numbers 0 through 15 once. First, we will rigidly
+define the completed game, and write a function that decides whether a
+given puzzle state is finished or not. This will be used later on.
+
+#+BEGIN_SRC c
 /* -------------------------------- */
 /* ---------- Puzzle game --------- */
 /* -------------------------------- */
@@ -189,7 +263,13 @@ int is_done(int s[4][4]) {
     }
     return 1; // done
 }
+#+END_SRC
 
+Next, we will need a utility function to copy the contents of an array
+to a new array. When we branch the states of the puzzle game, we will
+need to create new arrays like this.
+
+#+BEGIN_SRC c
 int** copyarray(int s[4][4]) {
     int i, j, temp[4][4];
     for (i=0; i<4; i++) {
@@ -199,9 +279,22 @@ int** copyarray(int s[4][4]) {
     }
     return (int **)temp;
 }
+#+END_SRC
 
-//movement controls: designate motion of the empty tile
+Next, we will need to define transition between puzzle states. The
+states of the puzzle form a symmetric group under composition of
+permutations, and we know that we can use products of transpositions
+to reach any permutation. (That said, an important note is that not
+every puzzle state can be reached from the done state, and therefore
+as permutations are invertible, there exist puzzle states which are
+unwinnable. In fact, exactly half of all possible layouts of a grid as
+described can be won.) Thus, the only operations we need define are
+four transpositions: left, right, up, and down. These designate the
+motion of the empty tile 0 around the board. With successive
+application of these functions, we can permute the game board as we
+please.
 
+#+BEGIN_SRC c
 int** left(int s[4][4]) {
     int i, j, temp, **ret = copyarray(s);
     for (i=0; i<4; i++) {
@@ -257,7 +350,16 @@ int** down(int s[4][4]) {
         }
     }
 }
+#+END_SRC
 
+We will be storing puzzle states in a priority queue implemented as a
+min-heap, so we must be able to rank states in terms of closeness to
+being done. The manhattan distance, or $\ell_1$ norm, can be used to
+measure the sum distance of each tile from where it is supposed to be
+in the finished puzzle. Thus, we must consider coordinates of tiles,
+and so we need a new data structure.
+
+#+BEGIN_SRC c
 typedef struct coord {
     int x;
     int y;
@@ -274,7 +376,12 @@ coord locate(int a, int s[4][4]) {
             }}
         }
 }
+#+END_SRC
 
+With this, we can measure manhattan distance, and therefore come up
+with a comparison function for our eventual min-heap to use.
+
+#+BEGIN_SRC c
 int manhattan(int s[4][4]) {
     int res = 0;
     for (int a=0; a<16; a++) {
@@ -293,7 +400,18 @@ bool compare(int (*s)[4][4], int (*t)[4][4]) {
     else
         return false;
 }
+#+END_SRC
 
+Now, we need to be able to use a priority queue to sort puzzle
+states. To save time and avoid error, we will use an already
+implemented library that utilizes a heap. The library is called PQlib
+and can be found at https://bitbucket.org/trijezdci/pqlib.
+
+We will now create yet another data type, an instance. This will keep
+track of puzzle states and such in the queue and hashtable. A function
+to create instances is also included.
+
+#+BEGIN_SRC c
 typedef struct instance {
     int isdone;
     int** s;
@@ -309,7 +427,11 @@ instance create_instance(int s[4][4]) {
     it.queue = pq_new_queue(0, &compare, NULL);
     return it;
 }
+#+END_SRC
 
+Next, we can begin solving the puzzle.
+
+#+BEGIN_SRC c
 int subsolve(instance it) {
     add_to_table(it.table, it.s);
     pq_enqueue(it.queue, it.s, NULL);
@@ -324,25 +446,11 @@ int subsolve(instance it) {
             pthread_create(NULL, NULL, pq_enqueue(it.queue, down(it.s), NULL), NULL);
             pthread_create(NULL, NULL, pq_enqueue(it.queue, up(it.s), NULL), NULL);
         }
-
 }
 
 int solve(int s[4][4]) {
     instance it = create_instance(s);
     subsolve(it);
 }
+#+END_SRC
 
-
-
-void solve_2(int s[4][4]) {
-    instance it = create_instance(s);
-    int finished = 0;
-    while (!finished) {
-        pthread_create()
-    }
-}
-
-int main() {
-    hashtable* ht = create_table();
-    return 0;
-}
