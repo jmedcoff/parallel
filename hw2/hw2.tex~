@@ -1,4 +1,4 @@
-% Created 2018-03-06 Tue 10:27
+% Created 2018-03-06 Tue 13:25
 \documentclass[11pt]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -28,6 +28,7 @@
 \begin{document}
 
 \maketitle
+All code following was written and compiled with CLion and CMake, including 
 
 \section{Problem 1}
 \label{sec-1}
@@ -172,5 +173,309 @@ great importance. Here we will take the product of the first row of
 the puzzle, and modulo by a number \verb~P~. Namely, the maximum possible
 product is $32670 = 12\cdot 13 \cdot 14\cdot 15$, and we will modulo
 by \verb~P~ = 10007, a prime number.
+
+\begin{verbatim}
+unsigned int hash_state(int a[4][4]) {
+    unsigned int key = 1;
+    int i;
+    for (i=0; i<4; i++) {
+        key *= a[0][i];
+    }
+    return key % P;
+}
+\end{verbatim}
+
+Next, we can now design functions to add values to the table, as well
+as check the table for existence of a particular value.
+
+\begin{verbatim}
+void add_to_table(hashtable* h, int a[4][4]) {
+    unsigned int key = hash_state(a);
+    int tn = (int) floor((key/P)*NLOCKS);
+    pthread_rwlock_wrlock(&h->locks[tn]);
+    //pthread_mutex_lock(&h->locks[tn]);
+    h->table[key]->key = key;
+    node_append(h->table[key]->values, a);
+    h->num_entries++;
+    pthread_rwlock_unlock(&h->locks[tn]);
+    //pthread_mutex_unlock(&h->locks[tn]);
+}
+
+int check_table(hashtable* h, int a[4][4]) {
+    unsigned int key = hash_state(a);
+    int tn = (int) floor((key/P)*NLOCKS);
+    pthread_rwlock_rdlock(&h->locks[tn]);
+    //pthread_mutex_lock(&h->locks[tn]);
+    node* res = node_search(h->table[key]->values, a);
+    pthread_rwlock_unlock(&h->locks[tn]);
+    //pthread_mutex_unlock(&h->locks[tn]);
+    if (res)
+        return 1;
+    return 0;
+}
+\end{verbatim}
+
+Note that in all code above, mutex and rwlocks are present, with one
+or the other commented out to allow switching between the two used in
+implementation.
+
+For testing purposes, we want to try hashing different objects and
+observe the running time. To do this, we must create objects the table
+can hash. While the puzzle states will be as described above, we can
+be more lenient with regards to testing, since the hash function will
+operate on a 2D array by taking the product of the first row. So, our
+function to create states for testing need only worry about putting
+numbers in the first row of a 2D array; we will do so randomly.
+
+\begin{verbatim}
+int** rand_state() {
+    // for testing purposes, we need only care about
+    // the rop row
+    int a[4][4];
+    srand(time(NULL));
+    for (int i=0; i<4; i++) {
+        a[0][i] = rand() % 20; // this doesn't matter
+    }
+    return a;
+}
+\end{verbatim}
+
+The driver for problem 1 can be written. We create 10,000 entries,
+then hash them and record the time taken.
+
+\begin{verbatim}
+void driver1() {
+    hashtable* ht = create_table();
+    time_t now = time(NULL);
+    for (int i=0; i<10000; i++) {
+        add_to_table(ht, rand_state());
+    }
+    int n = time(NULL) - now;
+    printf("time: %d\n", n);
+}
+\end{verbatim}
+
+
+
+\section{Problem 2}
+\label{sec-2}
+
+As described above, puzzle states are represented as $4\times 4$
+arrays holding the numbers 0 through 15 once. First, we will rigidly
+define the completed game, and write a function that decides whether a
+given puzzle state is finished or not. This will be used later on.
+
+\begin{verbatim}
+/* -------------------------------- */
+/* ---------- Puzzle game --------- */
+/* -------------------------------- */
+
+//the finished game. 0 represents the empty tile
+const int done[4][4] = {
+        {1,   2,   3,  4},
+        {5,   6,   7,  8},
+        {9,  10,  11, 12},
+        {13, 14,  15,  0}};
+
+int is_done(int s[4][4]) {
+    int i, j;
+    for (i=0; i<4; i++) {
+        for (j=0; j<4; j++) {
+            if (s[i][j] != done[i][j])
+                return 0; // not done
+        }
+    }
+    return 1; // done
+}
+\end{verbatim}
+
+Next, we will need a utility function to copy the contents of an array
+to a new array. When we branch the states of the puzzle game, we will
+need to create new arrays like this.
+
+\begin{verbatim}
+int** copyarray(int s[4][4]) {
+    int i, j, temp[4][4];
+    for (i=0; i<4; i++) {
+        for (j = 0; j < 4; j++) {
+            temp[i][j] = s[i][j];
+        }
+    }
+    return (int **)temp;
+}
+\end{verbatim}
+
+Next, we will need to define transition between puzzle states. The
+states of the puzzle form a symmetric group under composition of
+permutations, and we know that we can use products of transpositions
+to reach any permutation. (That said, an important note is that not
+every puzzle state can be reached from the done state, and therefore
+as permutations are invertible, there exist puzzle states which are
+unwinnable. In fact, exactly half of all possible layouts of a grid as
+described can be won.) Thus, the only operations we need define are
+four transpositions: left, right, up, and down. These designate the
+motion of the empty tile 0 around the board. With successive
+application of these functions, we can permute the game board as we
+please.
+
+\begin{verbatim}
+int** left(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
+    for (i=0; i<4; i++) {
+        for (j=0; j<4; j++) {
+            if (ret[i][j] == 0 && j != 0) {
+                temp = ret[i][j-1];
+                ret[i][j-1] = 0;
+                ret[i][j] = temp;
+                return ret;
+            }
+        }
+    }
+}
+
+int** right(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
+    for (i=0; i<4; i++) {
+        for (j=0; j<4; j++) {
+            if (ret[i][j] == 0 && j != 3) {
+                temp = ret[i][j+1];
+                ret[i][j+1] = 0;
+                ret[i][j] = temp;
+                return ret;
+            }
+        }
+    }
+}
+
+int** up(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
+    for (i=0; i<4; i++) {
+        for (j=0; j<4; j++) {
+            if (ret[i][j] == 0 && i != 0) {
+                temp = ret[i-1][j];
+                ret[i-1][j] = 0;
+                ret[i][j] = temp;
+                return ret;
+            }
+        }
+    }
+}
+
+int** down(int s[4][4]) {
+    int i, j, temp, **ret = copyarray(s);
+    for (i=0; i<4; i++) {
+        for (j=0; j<4; j++) {
+            if (ret[i][j] == 0 && i != 3) {
+                temp = ret[i+1][j];
+                ret[i+1][j] = 0;
+                ret[i][j] = temp;
+                return ret;
+            }
+        }
+    }
+}
+\end{verbatim}
+
+We will be storing puzzle states in a priority queue implemented as a
+min-heap, so we must be able to rank states in terms of closeness to
+being done. The manhattan distance, or $\ell_1$ norm, can be used to
+measure the sum distance of each tile from where it is supposed to be
+in the finished puzzle. Thus, we must consider coordinates of tiles,
+and so we need a new data structure.
+
+\begin{verbatim}
+typedef struct coord {
+    int x;
+    int y;
+} coord;
+
+coord locate(int a, int s[4][4]) {
+    for (int i=0; i<4; i++) {
+        for (int j=0; j<4; j++) {
+            if (s[i][j] == a) {
+                coord res;
+                res.x = i;
+                res.y = j;
+                return res;
+            }}
+        }
+}
+\end{verbatim}
+
+With this, we can measure manhattan distance, and therefore come up
+with a comparison function for our eventual min-heap to use.
+
+\begin{verbatim}
+int manhattan(int s[4][4]) {
+    int res = 0;
+    for (int a=0; a<16; a++) {
+        coord c = locate(a, s);
+        coord r = locate(a, done);
+        res += abs(c.x - r.x) + abs(c.y - r.y);
+    }
+    return res;
+}
+
+bool compare(int (*s)[4][4], int (*t)[4][4]) {
+    int sdist = manhattan(*s);
+    int tdist = manhattan(*t);
+    if (sdist < tdist)
+        return true;
+    else
+        return false;
+}
+\end{verbatim}
+
+Now, we need to be able to use a priority queue to sort puzzle
+states. To save time and avoid error, we will use an already
+implemented library that utilizes a heap. The library is called PQlib
+and can be found at \url{https://bitbucket.org/trijezdci/pqlib}.
+
+We will now create yet another data type, an instance. This will keep
+track of puzzle states and such in the queue and hashtable. A function
+to create instances is also included.
+
+\begin{verbatim}
+typedef struct instance {
+    int isdone;
+    int** s;
+    hashtable* table;
+    pq_t queue;
+} instance;
+
+instance create_instance(int s[4][4]) {
+    instance it;
+    it.isdone = 0;
+    it.s = s;
+    it.table = create_table();
+    it.queue = pq_new_queue(0, &compare, NULL);
+    return it;
+}
+\end{verbatim}
+
+Next, we can begin solving the puzzle.
+
+\begin{verbatim}
+int subsolve(instance it) {
+    add_to_table(it.table, it.s);
+    pq_enqueue(it.queue, it.s, NULL);
+    if (it.isdone > 0 || is_done(it.s)) {
+        it.isdone += 1;
+        pthread_exit(NULL);
+    }
+    else
+        while (it.isdone<1) {
+            pthread_create(NULL, NULL, pq_enqueue(it.queue, left(it.s), NULL), NULL);
+            pthread_create(NULL, NULL, pq_enqueue(it.queue, right(it.s), NULL), NULL);
+            pthread_create(NULL, NULL, pq_enqueue(it.queue, down(it.s), NULL), NULL);
+            pthread_create(NULL, NULL, pq_enqueue(it.queue, up(it.s), NULL), NULL);
+        }
+}
+
+int solve(int s[4][4]) {
+    instance it = create_instance(s);
+    subsolve(it);
+}
+\end{verbatim}
 % Emacs 25.2.2 (Org mode 8.2.10)
 \end{document}
