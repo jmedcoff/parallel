@@ -27,7 +27,7 @@ __global__ void MatrixMulKernel(float* Md, float* Nd, float* Pd, int Width)
     __syncthreads();
     for (int k = 0; k < BLOCK_SIZE; ++k)
       Pvalue += Mds[ty][k] * Nds[k][tx];
-    syncthreads();
+    __syncthreads();
   }
   Pd[Row*Width+Col] = Pvalue;
 }
@@ -180,7 +180,10 @@ int main() {
   cudaThreadSynchronize();
 
   // check a against the result d
-  print_mat(c, n);
+  float *id;
+  cudaMallocHost((void**) &id, totalsize);
+  make_identity(id, 0, 0, n, n);
+  printf("Sum: %f\n", rothVerf(c, id, n));
   
   // cleanup and exit
   cudaFree(dev_a);
