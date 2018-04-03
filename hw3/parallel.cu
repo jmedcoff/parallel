@@ -10,12 +10,12 @@ float getnum() {
 
 __global__ void gpu_matrix_multiply(float *a, float *b, float *c, int n) 
 {
-  __shared__ int tile_a[BLOCK_SIZE][BLOCK_SIZE];
-  __shared__ int tile_b[BLOCK_SIZE][BLOCK_SIZE];
+  __shared__ float tile_a[BLOCK_SIZE][BLOCK_SIZE];
+  __shared__ float tile_b[BLOCK_SIZE][BLOCK_SIZE];
 
   int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
   int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  int tmp = 0;
+  float tmp = 0.0f;
   int idx;
 
   for (int sub = 0; sub < gridDim.x; ++sub) 
@@ -24,7 +24,7 @@ __global__ void gpu_matrix_multiply(float *a, float *b, float *c, int n)
       if(idx >= n*n)
         {
 	  // n may not divisible by BLOCK_SIZE
-	  tile_a[threadIdx.y][threadIdx.x] = 0;
+	  tile_a[threadIdx.y][threadIdx.x] = 0.0f;
         }
       else
         {
@@ -34,7 +34,7 @@ __global__ void gpu_matrix_multiply(float *a, float *b, float *c, int n)
       idx = (sub * BLOCK_SIZE + threadIdx.y) * n + col;
       if(idx >= n*n)
         {
-	  tile_b[threadIdx.y][threadIdx.x] = 0;
+	  tile_b[threadIdx.y][threadIdx.x] = 0.0f;
         }  
       else
         {
@@ -162,7 +162,7 @@ void print_mat(float* a, int n) {
 
 int main() {
   srand(100);
-  int n = 16;
+  int n = 4092;
   int half = n>>1;
   size_t totalsize = sizeof(float)*n*n;
   size_t halfsize = sizeof(float)*half*half;
@@ -222,7 +222,8 @@ int main() {
 
   // intermediate matrix product
   gpu_matrix_multiply<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_inter, n);
-  
+  cudaThreadSynchronize();
+
   // reuse old matrix
   gpu_matrix_multiply<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
 
