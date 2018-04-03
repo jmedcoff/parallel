@@ -18,40 +18,6 @@ void matrix_multiply(float* a, float* b, float* c, int n, int q) {
   }
 }
 
-struct blockmat {
-  float* block1;
-  float* block2;
-  float* block3;
-  float* block4;
-};
-
-void block_mult(float* a, float* b, float* c, int n, int bsize) {
-  // assuming n is a multiple of bsize
-  // NOT WORKING AT THE MOMENT
-  int i, j, k, kprime, jprime;
-  float sum;
-  int en = bsize*(n/bsize);
-
-  for (i=0; i<n; i++) {
-    for (j=0; j<n; j++) {
-      c[i*n+j] = 0.0f;
-    }
-  }
-
-  for (kprime=0; kprime<en; kprime+=bsize) {
-    for (jprime=0; jprime<en; jprime+=bsize) {
-      for (i=0; i<n; i++) {
-	for (j=jprime; j<jprime+bsize; j++) {
-	  sum = c[i*n+j];
-	  for (k=kprime; k<kprime+bsize; k++) {
-	    sum += a[i*n+k] + b[k*n+j];
-	  }
-	  c[i*n+j] = sum;
-	}
-      }
-    }
-  }
-}
 
 void make_identity(float* a, int startx, int starty, int length, int n) {
   // fill a with the identity from start to end
@@ -170,53 +136,49 @@ int main() {
 
   if ((x==NULL) || (a==NULL) || (b==NULL) || (c==NULL) ||
       (d==NULL)) {
-    printf("Oh shit fam, memory machine broke\n");
+    printf("Matrix allocation error\n");
+    exit(1);
   }
-  else
-    printf("memory machine work\n");
 
   make_x(x, half);
 
   // construct first matrix
   make_identity(a, 0, 0, half, n);
-  printf("asdf\n");  
   copy_x(a, x, 0, half, half, n);
-
   make_zero(a, half, 0, half, n);
   make_identity(a, half, half, half, n);
-  print_mat(a, n);
   
   // second matrix
   make_identity(b, 0, 0, half, n);
   copy_2x(b, x, 0, half, half, n);
   make_zero(b, half, 0, half, n);
   make_negidentity(b, half, half, half, n);
-  print_mat(b, n);
 
   // third
   make_identity(c, 0, 0, half, n);
   copy_negx(c, x, 0, half, half, n);
   make_zero(c, half, 0, half, n);
   make_identity(c, half, half, half, n);
-  print_mat(c, n);
 
   // result
   make_result(d, n);
-  print_mat(d, n);
 
   // intermediate matrix product
   float* inter = malloc(sizeof(float)*n*n);
   //block_mult(a, b, inter, n, half);
   matrix_multiply(a, b, inter, n, half);
+  free(b);
+  
   // reuse old matrix
   //block_mult(inter, c, a, n, half);
   matrix_multiply(inter, c, a, n, half);
-  print_mat(a, n);
+  
   // check a against the result d
   float sum = rothVerf(a, d, n);
   printf("Total Error: %f\n", sum);
+
+  // cleanup and exit
   free(a);
-  free(b);
   free(c);
   free(d);
   free(inter);
