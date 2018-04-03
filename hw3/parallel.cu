@@ -162,7 +162,7 @@ void print_mat(float* a, int n) {
 
 int main() {
   srand(100);
-  int n = 8;
+  int n = 16;
   int half = n>>1;
   size_t totalsize = sizeof(float)*n*n;
   size_t halfsize = sizeof(float)*half*half;
@@ -187,7 +187,7 @@ int main() {
   copy_x(a, x, 0, half, half, n);
   make_zero(a, half, 0, half, n);
   make_identity(a, half, half, half, n);
-  
+
   // second matrix
   make_identity(b, 0, 0, half, n);
   copy_2x(b, x, 0, half, half, n);
@@ -209,7 +209,8 @@ int main() {
   cudaMalloc((void**) &dev_b, totalsize);
   cudaMalloc((void**) &dev_c, totalsize);
   cudaMalloc((void**) &dev_inter, totalsize);
-
+  
+  // copy to device
   cudaMemcpy(dev_a, a, totalsize, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_b, b, totalsize, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_c, c, totalsize, cudaMemcpyHostToDevice);
@@ -228,7 +229,7 @@ int main() {
   // bring product back to cpu
   cudaMemcpy(a, dev_a, totalsize, cudaMemcpyDeviceToHost);
   cudaThreadSynchronize();
-  print_mat(a, n);
+
   // check a against the result d
   float sum = rothVerf(a, d, n);
   printf("Total Error: %f\n", sum);
