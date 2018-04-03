@@ -141,53 +141,26 @@ void print_mat(float* a, int n) {
 int main() {
   srand(100);
   int n = 4092;
-  int half = n>>1;
   size_t totalsize = sizeof(float)*n*n;
-  size_t halfsize = sizeof(float)*half*half;
-  float *x, *a, *b, *c, *d;
+  float *a, *b, *c;
 
   cudaMallocHost((void**) &a, totalsize);
   cudaMallocHost((void**) &b, totalsize);
   cudaMallocHost((void**) &c, totalsize);
-  cudaMallocHost((void**) &d, totalsize);
-  cudaMallocHost((void**) &x, halfsize);
-  
-  if ((x==NULL) || (a==NULL) || (b==NULL) || (c==NULL) ||
-      (d==NULL)) {
-    printf("Matrix allocation error on host\n");
-    exit(1);
-  }
-
-  make_x(x, half);
 
   // construct first matrix
-  make_identity(a, 0, 0, half, n);
-  copy_x(a, x, 0, half, half, n);
-  make_zero(a, half, 0, half, n);
-  make_identity(a, half, half, half, n);
+  make_identity(a, 0, 0, n, n);
+
 
   // second matrix
-  make_identity(b, 0, 0, half, n);
-  copy_2x(b, x, 0, half, half, n);
-  make_zero(b, half, 0, half, n);
-  make_negidentity(b, half, half, half, n);
-
-  // third
-  make_identity(c, 0, 0, half, n);
-  copy_negx(c, x, 0, half, half, n);
-  make_zero(c, half, 0, half, n);
-  make_identity(c, half, half, half, n);
-
-  // result
-  make_result(d, n);
+  make_identity(b, 0, 0, n, n);
 
   // allocate on device
-  float *dev_a, *dev_b, *dev_c, *dev_inter;
+  float *dev_a, *dev_b, *dev_c;
   cudaMalloc((void**) &dev_a, totalsize);
   cudaMalloc((void**) &dev_b, totalsize);
   cudaMalloc((void**) &dev_c, totalsize);
-  cudaMalloc((void**) &dev_inter, totalsize);
-  
+
   // copy to device
   cudaMemcpy(dev_a, a, totalsize, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_b, b, totalsize, cudaMemcpyHostToDevice);
@@ -199,29 +172,23 @@ int main() {
   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
 
   // intermediate matrix product
-  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_inter, n);
+  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_c, n);
   cudaThreadSynchronize();
 
-  // reuse old matrix
-  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
-
   // bring product back to cpu
-  cudaMemcpy(a, dev_a, totalsize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(c, dev_c, totalsize, cudaMemcpyDeviceToHost);
   cudaThreadSynchronize();
 
   // check a against the result d
-  float sum = rothVerf(a, d, n);
-  printf("Total Error: %f\n", sum);
-
+  print_mat(c, n);
+  
   // cleanup and exit
   cudaFree(dev_a);
   cudaFree(dev_b);
   cudaFree(dev_c);
-  cudaFree(dev_inter);
+
   cudaFreeHost(a);
   cudaFreeHost(b);
   cudaFreeHost(c);
-  cudaFreeHost(d);
-  cudaFreeHost(x);
   return 0;
 }
