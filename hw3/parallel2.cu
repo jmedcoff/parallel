@@ -9,50 +9,27 @@ float getnum() {
 }
 
 
-__global__ void gpu_matrix_multiply(float *a, float *b, float *c, int n) 
+__global__ void MatrixMulKernel(float* Md, float* Nd, float* Pd, int Width)
 {
-  __shared__ float tile_a[BLOCK_SIZE][BLOCK_SIZE];
-  __shared__ float tile_b[BLOCK_SIZE][BLOCK_SIZE];
-
-  int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
-  int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  float tmp = 0.0f;
-  int idx;
-
-  for (int sub = 0; sub < gridDim.x; ++sub) 
-    {
-      idx = row * n + sub * BLOCK_SIZE + threadIdx.x;
-      if(idx >= n*n)
-        {
-	  // n may not divisible by BLOCK_SIZE
-	  tile_a[threadIdx.y][threadIdx.x] = 0.0f;
-        }
-      else
-        {
-	  tile_a[threadIdx.y][threadIdx.x] = a[idx];
-        }
-
-      idx = (sub * BLOCK_SIZE + threadIdx.y) * n + col;
-      if(idx >= n*n)
-        {
-	  tile_b[threadIdx.y][threadIdx.x] = 0.0f;
-        }  
-      else
-        {
-	  tile_b[threadIdx.y][threadIdx.x] = b[idx];
-        }
-      __syncthreads();
-
-      for (int k = 0; k < BLOCK_SIZE; ++k) 
-        {
-	  tmp += tile_a[threadIdx.y][k] * tile_b[k][threadIdx.x];
-        }
-      __syncthreads();
-    }
-  if(row < n && col < n)
-    {
-      c[row * n + col] = tmp;
-    }
+  __shared__float Mds[TILE_WIDTH][TILE_WIDTH];
+  __shared__float Nds[TILE_WIDTH][TILE_WIDTH];
+  int bx = blockIdx.x; int by = blockIdx.y;
+  int tx = threadIdx.x; int ty = threadIdx.y;
+  // Identify the row and column of the Pd element to work on
+  int Row = by * TILE_WIDTH + ty;
+  int Col = bx * TILE_WIDTH + tx;
+  float Pvalue = 0;
+  // Loop over the Md and Nd tiles required to compute the Pd element
+  for (int m = 0; m < Width/TILE_WIDTH; ++m) {
+    // Collaborative loading of Md and Nd tiles into shared memory
+    Mds[ty][tx] = Md[Row*Width + (m*TILE_WIDTH + tx)];
+    Nds[ty][tx] = Nd[Col + (m*TILE_WIDTH + ty)*Width];
+    __syncthreads();
+    for (int k = 0; k < TILE_WIDTH; ++k)
+      Pvalue += Mds[ty][k] * Nds[k][tx];
+    Synchthreads();
+  }
+  Pd[Row*Width+Col] = Pvalue;
 }
 
 
@@ -222,11 +199,11 @@ int main() {
   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
 
   // intermediate matrix product
-  gpu_matrix_multiply<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_inter, n);
+  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_inter, n);
   cudaThreadSynchronize();
 
   // reuse old matrix
-  gpu_matrix_multiply<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
+  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
 
   // bring product back to cpu
   cudaMemcpy(a, dev_a, totalsize, cudaMemcpyDeviceToHost);
