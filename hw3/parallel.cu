@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 
+
+#define SUBMATRIX_SIZE 10000
 #define BLOCK_SIZE 16
 
 float getnum() {
@@ -19,7 +21,7 @@ __global__ void gpu_matrix_multiply(float *a, float *b, float *c, int n)
   float tmp = 0.0f;
   int idx;
 
-  for (int sub = 0; sub < gridDim.x; ++sub) 
+  for (int sub = 0; sub < gridDim.x; ++sub) // gridDim.x
     {
       idx = row * n + sub * BLOCK_SIZE + threadIdx.x;
       if(idx >= n*n)
@@ -163,7 +165,7 @@ void print_mat(float* a, int n) {
 
 int main() {
   srand(100);
-  int n = 4092;
+  int n = 2*SUBMATRIX_SIZE;
   int half = n>>1;
   size_t totalsize = sizeof(float)*n*n;
   size_t halfsize = sizeof(float)*half*half;

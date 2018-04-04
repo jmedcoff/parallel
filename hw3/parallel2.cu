@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cublas_v2.h>
+#include "cuda.h"
+#include <host_defines.h>
+#include <device_launch_parameters.h>
+#include <cuda_runtime.h>
 
+#define SUBMATRIX_SIZE 10000
 #define BLOCK_SIZE 16
 
 float getnum() {
@@ -27,7 +33,7 @@ __global__ void MatrixMulKernel(float* Md, float* Nd, float* Pd, int Width)
     __syncthreads();
     for (int k = 0; k < BLOCK_SIZE; ++k)
       Pvalue += Mds[ty][k] * Nds[k][tx];
-    syncthreads();
+    __syncthreads();
   }
   Pd[Row*Width+Col] = Pvalue;
 }
@@ -105,7 +111,7 @@ void make_result(float* a, int length) {
     for (j=0; j<length; j++) {
       if (i == j) {
 	if (i>=half)
-	  a[i*length+j] = -1.0f;
+	  a[i*length+j] = -(1.0f);
 	else
 	  a[i*length+j] = 1.0f;
       }
@@ -115,12 +121,14 @@ void make_result(float* a, int length) {
   }
 }
 
+#define ffabs(val) (val) < 0.0f ? (-(val)) : (val)
+
 float rothVerf(float* a, float* b, int n) {
   float sum = 0;
   int i, j;
   for (i=0; i<n; i++) {
     for (j=0; j<n; j++) {
-      sum += (float) fabs(a[i*n+j] - b[i*n+j]);
+      sum += ffabs(a[i*n+j] - b[i*n+j]);
     }
   }
   return sum;
@@ -137,11 +145,20 @@ void print_mat(float* a, int n) {
   printf("\n");
 }
 
+float trace(float* a, int n) {
+  int i;
+  float total = 1.0f;
+  for (i=0; i<n; i++) {
+    total *= a[i*n+i];
+  }
+  return total;
+}
+
 
 int main() {
   srand(100);
-  int n = 4092;
-  int half = n>>1;
+  int n = 2*SUBMATRIX_SIZE;
+  int half = SUBMATRIX_SIZE;
   size_t totalsize = sizeof(float)*n*n;
   size_t halfsize = sizeof(float)*half*half;
   float *x, *a, *b, *c, *d;
@@ -165,6 +182,7 @@ int main() {
   copy_x(a, x, 0, half, half, n);
   make_zero(a, half, 0, half, n);
   make_identity(a, half, half, half, n);
+  printf("Trace of a: %f\n", trace(a, n));
 
   // second matrix
   make_identity(b, 0, 0, half, n);
@@ -199,11 +217,16 @@ int main() {
   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
 
   // intermediate matrix product
-  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_inter, n);
+  //MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_inter, n);
+  cublasHandle_t handle;
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, n, n, &alpha, dev_a, n, dev_b, n, &beta, dev_inter, n);
   cudaThreadSynchronize();
 
   // reuse old matrix
-  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
+  //MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
+  cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, n, n, &alpha, dev_inter, n, dev_c, n, &beta, dev_a, n);
 
   // bring product back to cpu
   cudaMemcpy(a, dev_a, totalsize, cudaMemcpyDeviceToHost);

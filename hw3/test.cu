@@ -140,7 +140,7 @@ void print_mat(float* a, int n) {
 
 int main() {
   srand(100);
-  int n = 4092;
+  int n = 10000;
   size_t totalsize = sizeof(float)*n*n;
   float *a, *b, *c;
 
@@ -164,7 +164,6 @@ int main() {
   // copy to device
   cudaMemcpy(dev_a, a, totalsize, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_b, b, totalsize, cudaMemcpyHostToDevice);
-  cudaMemcpy(dev_c, c, totalsize, cudaMemcpyHostToDevice);
 
   unsigned int grid_rows = n / BLOCK_SIZE;
   unsigned int grid_cols = n / BLOCK_SIZE;
@@ -173,7 +172,6 @@ int main() {
 
   // intermediate matrix product
   MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_c, n);
-  cudaThreadSynchronize();
 
   // bring product back to cpu
   cudaMemcpy(c, dev_c, totalsize, cudaMemcpyDeviceToHost);
