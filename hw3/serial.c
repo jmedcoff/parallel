@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#define N 10000
 
 float getnum() {
   return rand()/((float) RAND_MAX);
@@ -126,7 +127,7 @@ void print_mat(float* a, int n) {
 
 int main() {
   srand(100);
-  int n = 1024;
+  int n = N;
   int half = n>>1;
   float* x = malloc(sizeof(float)*(half)*(half));
   float* a = malloc(sizeof(float)*n*n);
@@ -147,7 +148,7 @@ int main() {
   copy_x(a, x, 0, half, half, n);
   make_zero(a, half, 0, half, n);
   make_identity(a, half, half, half, n);
-  
+
   // second matrix
   make_identity(b, 0, 0, half, n);
   copy_2x(b, x, 0, half, half, n);
