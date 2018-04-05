@@ -11,7 +11,7 @@
 #define BLOCK_SIZE 16
 
 float getnum() {
-  return rand()/((float) RAND_MAX);
+  return ((float) rand())/((float) RAND_MAX);
 }
 
 
@@ -64,6 +64,7 @@ void make_x(float* x, int length) {
   for (i=0; i<length; i++) {
     for (j=0; j<length; j++) {
       x[i*length+j] = getnum();
+      //x[i*length+j] = 0.3;
     }
   }
 }
@@ -136,13 +137,15 @@ float rothVerf(float* a, float* b, int n) {
 
 void print_mat(float* a, int n) {
   int i, j;
-  for (i=0; i<n; i++) {
-    for (j=0; j<n; j++) {
-      printf("%.1f\t", a[i*n+j]);
+  if (n<64) {
+    for (i=0; i<n; i++) {
+      for (j=0; j<n; j++) {
+	printf("%.3f\t", a[i*n+j]);
+      }
+      printf("\n");
     }
     printf("\n");
   }
-  printf("\n");
 }
 
 float trace(float* a, int n) {
@@ -176,6 +179,7 @@ int main() {
   }
 
   make_x(x, half);
+  print_mat(x, half);
 
   // construct first matrix
   make_identity(a, 0, 0, half, n);
@@ -198,6 +202,10 @@ int main() {
 
   // result
   make_result(d, n);
+  print_mat(a, n);
+  print_mat(b, n);
+  print_mat(c, n);
+  print_mat(d, n);
 
   // allocate on device
   float *dev_a, *dev_b, *dev_c, *dev_inter;
@@ -221,12 +229,12 @@ int main() {
   cublasHandle_t handle;
   const float alpha = 1.0f;
   const float beta = 0.0f;
-  cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, n, n, &alpha, dev_a, n, dev_b, n, &beta, dev_inter, n);
+  cublasSgemm_v2(handle, CUBLAS_OP_T, CUBLAS_OP_T, n, n, n, &alpha, dev_a, n, dev_b, n, &beta, dev_inter, n);
   cudaThreadSynchronize();
 
   // reuse old matrix
   //MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
-  cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, n, n, &alpha, dev_inter, n, dev_c, n, &beta, dev_a, n);
+  cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_T, n, n, n, &alpha, dev_inter, n, dev_c, n, &beta, dev_a, n);
 
   // bring product back to cpu
   cudaMemcpy(a, dev_a, totalsize, cudaMemcpyDeviceToHost);
@@ -235,6 +243,7 @@ int main() {
   // check a against the result d
   float sum = rothVerf(a, d, n);
   printf("Total Error: %f\n", sum);
+  print_mat(a, n);
 
   // cleanup and exit
   cudaFree(dev_a);

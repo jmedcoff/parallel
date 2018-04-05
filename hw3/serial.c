@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-#define N 10000
+
+#define N 8
 
 float getnum() {
   return rand()/((float) RAND_MAX);
@@ -164,11 +165,16 @@ int main() {
   // result
   make_result(d, n);
 
+  print_mat(a, n);
+  print_mat(b, n);
+  print_mat(c, n);
+
   // intermediate matrix product
   float* inter = malloc(sizeof(float)*n*n);
   //block_mult(a, b, inter, n, half);
   matrix_multiply(a, b, inter, n, half);
   free(b);
+  print_mat(inter, n);
   
   // reuse old matrix
   //block_mult(inter, c, a, n, half);

@@ -1,35 +1,64 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cublas_v2.h>
+#include "cuda.h"
+#include <host_defines.h>
+#include <device_launch_parameters.h>
+#include <cuda_runtime.h>
 
 #define BLOCK_SIZE 16
+#define N 256
 
 float getnum() {
   return rand()/((float) RAND_MAX);
 }
 
 
-__global__ void MatrixMulKernel(float* Md, float* Nd, float* Pd, int Width)
+__global__ void gpu_matrix_multiply(float *a, float *b, float *c, int n) 
 {
-  __shared__ float Mds[BLOCK_SIZE][BLOCK_SIZE];
-  __shared__ float Nds[BLOCK_SIZE][BLOCK_SIZE];
-  int bx = blockIdx.x; int by = blockIdx.y;
-  int tx = threadIdx.x; int ty = threadIdx.y;
-  // Identify the row and column of the Pd element to work on
-  int Row = by * BLOCK_SIZE + ty;
-  int Col = bx * BLOCK_SIZE + tx;
-  float Pvalue = 0;
-  // Loop over the Md and Nd tiles required to compute the Pd element
-  for (int m = 0; m < Width/BLOCK_SIZE; ++m) {
-    // Collaborative loading of Md and Nd tiles into shared memory
-    Mds[ty][tx] = Md[Row*Width + (m*BLOCK_SIZE + tx)];
-    Nds[ty][tx] = Nd[Col + (m*BLOCK_SIZE + ty)*Width];
-    __syncthreads();
-    for (int k = 0; k < BLOCK_SIZE; ++k)
-      Pvalue += Mds[ty][k] * Nds[k][tx];
-    __syncthreads();
-  }
-  Pd[Row*Width+Col] = Pvalue;
+  __shared__ float tile_a[BLOCK_SIZE][BLOCK_SIZE];
+  __shared__ float tile_b[BLOCK_SIZE][BLOCK_SIZE];
+
+  int row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+  int col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  float tmp = 0.0f;
+  int idx;
+
+  for (int sub = 0; sub < gridDim.x; ++sub) // gridDim.x
+    {
+      idx = row * n + sub * BLOCK_SIZE + threadIdx.x;
+      if(idx >= n*n)
+        {
+	  // n may not divisible by BLOCK_SIZE
+	  tile_a[threadIdx.y][threadIdx.x] = 0.0f;
+        }
+      else
+        {
+	  tile_a[threadIdx.y][threadIdx.x] = a[idx];
+        }
+
+      idx = (sub * BLOCK_SIZE + threadIdx.y) * n + col;
+      if(idx >= n*n)
+        {
+	  tile_b[threadIdx.y][threadIdx.x] = 0.0f;
+        }  
+      else
+        {
+	  tile_b[threadIdx.y][threadIdx.x] = b[idx];
+        }
+      __syncthreads();
+
+      for (int k = 0; k < BLOCK_SIZE; ++k) 
+        {
+	  tmp += tile_a[threadIdx.y][k] * tile_b[k][threadIdx.x];
+        }
+      __syncthreads();
+    }
+  if(row < n && col < n)
+    {
+      c[row * n + col] = tmp;
+    }
 }
 
 
@@ -115,6 +144,7 @@ void make_result(float* a, int length) {
   }
 }
 
+
 float rothVerf(float* a, float* b, int n) {
   float sum = 0;
   int i, j;
@@ -140,13 +170,15 @@ void print_mat(float* a, int n) {
 
 int main() {
   srand(100);
-  int n = 10000;
+  int n = N;
   size_t totalsize = sizeof(float)*n*n;
-  float *a, *b, *c;
+  float *a, *b, *c, *id;
 
   cudaMallocHost((void**) &a, totalsize);
   cudaMallocHost((void**) &b, totalsize);
   cudaMallocHost((void**) &c, totalsize);
+  cudaMallocHost((void**) &id, totalsize);
+  make_identity(id, 0, 0, n, n);
 
   // construct first matrix
   make_identity(a, 0, 0, n, n);
@@ -161,35 +193,39 @@ int main() {
   cudaMalloc((void**) &dev_b, totalsize);
   cudaMalloc((void**) &dev_c, totalsize);
 
+  
+
   // copy to device
   cudaMemcpy(dev_a, a, totalsize, cudaMemcpyHostToDevice);
   cudaMemcpy(dev_b, b, totalsize, cudaMemcpyHostToDevice);
-
-  unsigned int grid_rows = n / BLOCK_SIZE;
-  unsigned int grid_cols = n / BLOCK_SIZE;
-  dim3 dimGrid(grid_cols, grid_rows);
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-
+ 
   // intermediate matrix product
-  MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_a, dev_b, dev_c, n);
+  cublasHandle_t handle;
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  
+  cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_N, n, n, n, &alpha, dev_a, n, dev_b, n, &beta, dev_c, n);
+  printf("ok\n");
+  cudaThreadSynchronize();
+ 
 
   // bring product back to cpu
   cudaMemcpy(c, dev_c, totalsize, cudaMemcpyDeviceToHost);
-  cudaThreadSynchronize();
-
-  // check a against the result d
-  float *id;
-  cudaMallocHost((void**) &id, totalsize);
-  make_identity(id, 0, 0, n, n);
-  printf("Sum: %f\n", rothVerf(c, id, n));
-  
-  // cleanup and exit
   cudaFree(dev_a);
   cudaFree(dev_b);
   cudaFree(dev_c);
-
   cudaFreeHost(a);
   cudaFreeHost(b);
+
+
+
+  // check a against the result d
+  
+  printf("Sum: %f\n", rothVerf(c, id, n));
+  
+  // cleanup and exit
+  
   cudaFreeHost(c);
+  cudaFreeHost(id);
   return 0;
 }
