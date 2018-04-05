@@ -213,6 +213,12 @@ int main() {
   cudaMalloc((void**) &dev_b, totalsize);
   cudaMalloc((void**) &dev_c, totalsize);
   cudaMalloc((void**) &dev_inter, totalsize);
+
+  // set up metrics
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start, 0);
   
   // copy to device
   cudaMemcpy(dev_a, a, totalsize, cudaMemcpyHostToDevice);
@@ -235,14 +241,20 @@ int main() {
   // reuse old matrix
   //MatrixMulKernel<<<dimGrid, dimBlock>>>(dev_inter, dev_c, dev_a, n);
   cublasSgemm_v2(handle, CUBLAS_OP_N, CUBLAS_OP_T, n, n, n, &alpha, dev_inter, n, dev_c, n, &beta, dev_a, n);
+  cudaThreadSynchronize();
 
   // bring product back to cpu
   cudaMemcpy(a, dev_a, totalsize, cudaMemcpyDeviceToHost);
-  cudaThreadSynchronize();
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  float elapsed;
+  cudaEventElapsedTime(&elapsed, start, stop);
+  
 
   // check a against the result d
   float sum = rothVerf(a, d, n);
   printf("Total Error: %f\n", sum);
+  printf("GPU Elapsed: %f\n", elapsed);
   print_mat(a, n);
 
   // cleanup and exit
